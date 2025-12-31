@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hệ thống ETL & AI Sentiment Analysis</title>
 
-    <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
     <style>
@@ -19,7 +18,6 @@
 <div class="container py-5">
     <h1 class="text-center mb-4">Cloud ETL SaaS Platform</h1>
 
-    <!-- ===== AUTH ===== -->
     <div id="auth-section" class="row justify-content-center">
         <div class="col-md-5">
             <div class="card p-4">
@@ -34,7 +32,6 @@
         </div>
     </div>
 
-    <!-- ===== MAIN ===== -->
     <div id="main-section">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h4>Xin chào, <span id="display-user" class="text-primary"></span>!</h4>
@@ -42,7 +39,6 @@
         </div>
 
         <div class="row">
-            <!-- Upload -->
             <div class="col-md-4">
                 <div class="card p-4">
                     <h5>Tải lên file dữ liệu (.csv)</h5>
@@ -55,7 +51,6 @@
                 </div>
             </div>
 
-            <!-- History -->
             <div class="col-md-8">
                 <div class="card p-4">
                     <h5>Lịch sử xử lý ETL</h5>
@@ -96,8 +91,19 @@
         document.getElementById('display-user').innerText = localStorage.getItem('username');
         loadJobs();
     }
+         // ===== DOWNLOAD FILE (S3 PRESIGNED URL) =====
+    async function downloadFile(s3_key) {
+        const res = await fetch('/api/jobs/download', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ s3_key })
+        });
 
-    // ===== AUTH =====
+        const data = await res.json();
+        window.location.href = data.url;
+    }
+
+
     async function handleRegister() {
         const res = await fetch('/api/auth/register', {
             method: 'POST',
@@ -134,7 +140,6 @@
         location.reload();
     }
 
-    // ===== UPLOAD & ETL =====
     async function uploadAndProcess() {
         const fileInput = document.getElementById('file-input');
         if (!fileInput.files[0]) return alert("Hãy chọn file!");
@@ -144,7 +149,7 @@
         const btn = document.getElementById('upload-btn');
 
         btn.disabled = true;
-        status.innerHTML = "⏳ Đang lấy link S3...";
+        status.innerHTML = "Đang lấy link S3...";
 
         try {
             const urlRes = await fetch('/api/jobs/upload_url', {
@@ -154,10 +159,10 @@
             });
             const { url, file_key } = await urlRes.json();
 
-            status.innerHTML = "⬆️ Đang upload lên S3...";
+            status.innerHTML = "⬆Đang upload lên S3...";
             await fetch(url, { method: 'PUT', body: file });
 
-            status.innerHTML = "🤖 Đang chạy ETL & AI...";
+            status.innerHTML = "Đang chạy ETL & AI...";
             const etlRes = await fetch('/api/jobs/start_etl', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -169,17 +174,16 @@
             const etlData = await etlRes.json();
 
             alert(etlData.message);
-            status.innerHTML = "✅ Hoàn thành!";
+            status.innerHTML = " Hoàn thành!";
             loadJobs();
         } catch (e) {
             console.error(e);
-            alert("❌ Có lỗi xảy ra!");
+            alert(" Có lỗi xảy ra!");
         } finally {
             btn.disabled = false;
         }
     }
 
-    // ===== LOAD JOBS =====
     async function loadJobs() {
         const res = await fetch('/api/jobs');
         const jobs = await res.json();
@@ -195,11 +199,14 @@
                 </td>
                 <td>${j.upload_time}</td>
                 <td>
-                    ${j.result_url
-                        ? `<a href="${j.result_url}" target="_blank">Tải file</a>`
-                        : '-'}
+                    ${j.status === 'Completed'
+                   ? `<button class="btn btn-sm btn-outline-primary"
+                   onclick="downloadFile('${j.result_url.split('.com/')[1]}')">
+                   Tải file
+                  </button>`
+                  : '-'}
                 </td>
-            </tr>
+             </tr>
         `).join('');
     }
 </script>

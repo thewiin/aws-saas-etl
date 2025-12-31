@@ -5,6 +5,7 @@ from models import db, User, Job
 
 import boto3
 import os
+import io
 import pandas as pd
 from io import BytesIO, StringIO
 from dotenv import load_dotenv
@@ -54,12 +55,19 @@ def sentiment_rule(text):
 
     positive_words = [
         "good", "great", "excellent", "amazing", "love",
-        "awesome", "perfect", "nice", "satisfied", "happy"
+        "awesome", "perfect", "nice", "satisfied", "happy", "delightful", "smooth","efficient","valuable",
+        "friendly", "helpful","convenient","stable","fast","responsive","clear","simple","intuitive",
+        "trustworthy","high-quality","effective","comfortable","polished","consistent","professional"
     ]
 
     negative_words = [
         "bad", "terrible", "awful", "hate", "poor",
-        "slow", "worst", "disappointed", "problem"
+        "slow", "worst", "disappointed", "problem",
+        "confusing","unstable","crash","lag","freeze",
+        "broken","misleading","frustrating","inconvenient",
+        "complex","unclear","inaccurate","unreliable",
+        "overpriced","waste", "glitch","timeout","disconnect",
+        "incomplete","messy"
     ]
 
     pos = sum(word in text for word in positive_words)
@@ -69,7 +77,7 @@ def sentiment_rule(text):
 
 @app.route("/")
 def home():
-    return render_template("index1.html")
+    return render_template("index.html")
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
