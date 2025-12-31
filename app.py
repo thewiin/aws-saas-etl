@@ -3,148 +3,212 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from models import db, User, Job
+
 import boto3
 import os
-import json
-import random
+import io
+import pandas as pd
 from dotenv import load_dotenv
+from io import BytesIO
 
+# =========================
+# LOAD ENV
+# =========================
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-s3_client = boto3.client('s3', region_name=os.getenv('REGION_NAME'))
-lambda_client = boto3.client('lambda', region_name=os.getenv('REGION_NAME'))
+# =========================
+# AWS CONFIG
+# =========================
+REGION = os.getenv("REGION_NAME", "us-east-1")
+BUCKET_NAME = "etl-data-btl-2025"
+OUTPUT_KEY = "updates/data.csv"
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:Nhaiben%401651652004@localhost:5432/etl_saas_db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+s3_client = boto3.client("s3", region_name=REGION)
 
-# Cấu hình tên Bucket
-RAW_BUCKET = 'yourname-etl-raw-data'
+# =========================
+# DATABASE CONFIG (POSTGRES RDS)
+# =========================
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    "postgresql://postgres:postgres123@YOUR-RDS-ENDPOINT:5432/postgres"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Khởi tạo DB cùng với App
 db.init_app(app)
 
-# Tạo bảng tự động nếu chưa có
-# with app.app_context():
-#     db.create_all()
+with app.app_context():
+    db.create_all()
 
-@app.route('/')
+# =========================
+# HELPER FUNCTIONS
+# =========================
+def read_csv_from_s3(bucket, key):
+    obj = s3_client.get_object(Bucket=bucket, Key=key)
+    df = pd.read_csv(BytesIO(obj["Body"].read()))
+    return df
+
+
+def save_csv_to_s3(df, bucket, key):
+    buffer = io.StringIO()
+    df.to_csv(buffer, index=False)
+
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=buffer.getvalue(),
+        ContentType="text/csv"
+    )
+
+# =========================
+# ROUTES
+# =========================
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/api/auth/register', methods=['POST'])
+# =========================
+# AUTH
+# =========================
+@app.route("/api/auth/register", methods=["POST"])
 def register():
     data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    username = data.get("username")
+    password = data.get("password")
 
     if not username or not password:
-        return jsonify({'message': 'Vui lòng điền đủ thông tin!'}), 400
+        return jsonify({"message": "Vui lòng điền đủ thông tin"}), 400
 
     if User.query.filter_by(username=username).first():
-        return jsonify({'message': 'Tên đăng nhập đã tồn tại!'}), 409
+        return jsonify({"message": "Tên đăng nhập đã tồn tại"}), 409
 
-    hashed_password = generate_password_hash(password)
+    user = User(
+        username=username,
+        password=generate_password_hash(password)
+    )
 
-    new_user = User(username=username, password=hashed_password)
-    db.session.add(new_user)
+    db.session.add(user)
     db.session.commit()
 
-    return jsonify({'message': 'Tạo tài khoản thành công! Hãy đăng nhập.'}), 201
+    return jsonify({"message": "Đăng ký thành công"}), 201
 
 
-@app.route('/api/auth/login', methods=['POST'])
+@app.route("/api/auth/login", methods=["POST"])
 def login():
     data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    user = User.query.filter_by(username=data.get("username")).first()
 
-    user = User.query.filter_by(username=username).first()
-
-    if user and check_password_hash(user.password, password):
+    if user and check_password_hash(user.password, data.get("password")):
         return jsonify({
-            'message': 'Đăng nhập thành công',
-            'user_id': user.id,
-            'username': user.username
-        }), 200
-    else:
-        return jsonify({'message': 'Sai tên đăng nhập hoặc mật khẩu'}), 401
+            "message": "Đăng nhập thành công",
+            "user_id": user.id,
+            "username": user.username
+        })
 
-# API 1: Lấy URL để upload file [cite: 65]
-@app.route('/api/jobs/upload_url', methods=['POST'])
-def get_presigned_url():
-    file_name = request.json.get('file_name')
+    return jsonify({"message": "Sai tài khoản hoặc mật khẩu"}), 401
 
-    # [REAL MODE] Nếu có AWS S3 thật:
-    # try:
-    #     url = s3_client.generate_presigned_url(...)
-    #     return jsonify({'url': url, 'file_key': file_name})
-    # except: ...
+# =========================
+# UPLOAD FILE (PRESIGNED URL)
+# =========================
+@app.route("/api/jobs/upload_url", methods=["POST"])
+def get_upload_url():
+    data = request.get_json()
 
-    # [DEMO MODE] Trả về thành công giả định để Frontend chạy tiếp
+    if "file_name" not in data:
+        return jsonify({"error": "Thiếu file_name"}), 400
+
+    file_key = f"uploads/{data['file_name']}"
+
+    url = s3_client.generate_presigned_url(
+        ClientMethod="put_object",
+        Params={
+            "Bucket": BUCKET_NAME,
+            "Key": file_key,
+            "ContentType": "text/csv"
+        },
+        ExpiresIn=3600
+    )
+
     return jsonify({
-        'url': 'https://fake-s3-url.com/upload',
-        'file_key': file_name
+        "url": url,
+        "file_key": file_key
     })
 
-# API 2: Kích hoạt ETL Job [cite: 66, 75]
-@app.route('/api/jobs/start_etl', methods=['POST'])
+# =========================
+# API 2: START ETL JOB
+# =========================
+@app.route("/api/jobs/start_etl", methods=["POST"])
 def start_etl_job():
-    data = request.json
-    file_key = data.get('file_key')
-    options = data.get('options', {})
-
-    # Lấy user hiện tại (Demo thì lấy user đầu tiên trong DB)
-    user = User.query.first()
-    if not user:
-        return jsonify({'message': 'Chưa có User nào trong DB!'}), 400
-
-    # 1. Tạo Job mới trong Database với trạng thái 'Processing'
-    new_job = Job(
-        filename=file_key,
-        status='Processing',
-        user_id=user.id
-    )
-    db.session.add(new_job)
-    db.session.commit()
-
-    # [DEMO MODE] Giả lập AWS Lambda xử lý xong sau 1 giây
-    # Trong thực tế: Lambda sẽ tự update DB, còn ở đây ta tự update luôn để demo
     try:
-        # Giả vờ xử lý...
-        status = 'Completed'
-        # Nếu chọn AI, giả lập link kết quả có thêm hậu tố
-        result_link = f"https://s3-bucket.aws.com/processed_{file_key}"
+        data = request.get_json()
+        if not data or "file_key" not in data:
+            return jsonify({"message": "Thiếu file_key"}), 400
 
-        # Cập nhật trạng thái Job thành công
-        new_job.status = status
-        new_job.result_url = result_link
+        file_key = data["file_key"]
+
+        # lấy user demo
+        user = User.query.first()
+        if not user:
+            return jsonify({"message": "Chưa có User nào trong DB"}), 400
+
+        # 1. Tạo Job
+        new_job = Job(
+            filename=file_key,
+            status="Processing",
+            user_id=user.id
+        )
+        db.session.add(new_job)
+        db.session.commit()
+
+        # 2. Đọc CSV từ S3
+        df = read_csv_from_s3(BUCKET_NAME, file_key)
+
+        if "comments" not in df.columns:
+            raise Exception("CSV thiếu cột 'comments'")
+
+        # 3. Xử lý dữ liệu (DEMO)
+        df["comment_length"] = df["comments"].astype(str).apply(len)
+
+        # 4. Ghi kết quả lên S3
+        save_csv_to_s3(df, BUCKET_NAME, OUTPUT_KEY)
+
+        # 5. Update DB
+        new_job.status = "Completed"
+        new_job.result_url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{OUTPUT_KEY}"
         db.session.commit()
 
         return jsonify({
-            'message': 'Job ETL & AI đã hoàn tất!',
-            'job_id': new_job.id
+            "message": "ETL xử lý thành công",
+            "job_id": new_job.id,
+            "result_url": new_job.result_url
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/jobs', methods=['GET'])
+# =========================
+# GET ALL JOBS
+# =========================
+@app.route("/api/jobs", methods=["GET"])
 def get_jobs():
     jobs = Job.query.order_by(Job.upload_time.desc()).all()
+    result = []
 
-    job_list = []
     for j in jobs:
-        job_list.append({
-            'id': j.id,
-            'filename': j.filename,
-            'status': j.status,
-            'result_url': j.result_url,
-            'upload_time': j.upload_time.strftime("%Y-%m-%d %H:%M:%S")
+        result.append({
+            "id": j.id,
+            "filename": j.filename,
+            "status": j.status,
+            "result_url": j.result_url,
+            "upload_time": j.upload_time.strftime("%Y-%m-%d %H:%M:%S")
         })
-    return jsonify(job_list)
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    return jsonify(result)
+
+# =========================
+# MAIN
+# =========================
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)

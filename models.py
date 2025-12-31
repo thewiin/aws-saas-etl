@@ -7,6 +7,7 @@ db = SQLAlchemy()
 # Bảng 1: User
 class User(db.Model):
     __tablename__ = 'users'
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)  # Lưu password đã mã hóa
@@ -22,6 +23,7 @@ class User(db.Model):
 # Bảng 2: Job (Lịch sử ETL)
 class Job(db.Model):
     __tablename__ = 'jobs'
+
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(20), default='Pending')

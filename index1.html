@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống ETL & AI Sentiment Analysis</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #auth-section, #main-section { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container py-5">
+    <h1 class="text-center mb-4">Cloud ETL SaaS Platform</h1>
+
+    <!-- ===== AUTH ===== -->
+    <div id="auth-section" class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card p-4">
+                <h3 class="text-center mb-3">Đăng nhập</h3>
+                <input type="text" id="username" class="form-control mb-2" placeholder="Tên đăng nhập">
+                <input type="password" id="password" class="form-control mb-3" placeholder="Mật khẩu">
+                <button onclick="handleLogin()" class="btn btn-primary w-100 mb-2">Đăng nhập</button>
+                <button onclick="handleRegister()" class="btn btn-outline-secondary w-100">
+                    Đăng ký tài khoản mới
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== MAIN ===== -->
+    <div id="main-section">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4>Xin chào, <span id="display-user" class="text-primary"></span>!</h4>
+            <button onclick="handleLogout()" class="btn btn-danger btn-sm">Đăng xuất</button>
+        </div>
+
+        <div class="row">
+            <!-- Upload -->
+            <div class="col-md-4">
+                <div class="card p-4">
+                    <h5>Tải lên file dữ liệu (.csv)</h5>
+                    <p class="small text-muted">File phải có cột <b>comments</b> để AI phân tích.</p>
+                    <input type="file" id="file-input" class="form-control mb-3">
+                    <button id="upload-btn" onclick="uploadAndProcess()" class="btn btn-success w-100">
+                        Upload & Chạy AI
+                    </button>
+                    <div id="status" class="mt-2 small"></div>
+                </div>
+            </div>
+
+            <!-- History -->
+            <div class="col-md-8">
+                <div class="card p-4">
+                    <h5>Lịch sử xử lý ETL</h5>
+                    <table class="table table-hover mt-3">
+                        <thead class="table-light">
+                            <tr>
+                                <th>File</th>
+                                <th>Trạng thái</th>
+                                <th>Thời gian</th>
+                                <th>Kết quả (S3)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="job-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentUserId = localStorage.getItem('user_id');
+
+    // Check login
+    window.onload = () => {
+        if (currentUserId) showMain();
+        else showAuth();
+    };
+
+    function showAuth() {
+        document.getElementById('auth-section').style.display = 'flex';
+        document.getElementById('main-section').style.display = 'none';
+    }
+
+    function showMain() {
+        document.getElementById('auth-section').style.display = 'none';
+        document.getElementById('main-section').style.display = 'block';
+        document.getElementById('display-user').innerText = localStorage.getItem('username');
+        loadJobs();
+    }
+
+    // ===== AUTH =====
+    async function handleRegister() {
+        const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                username: username.value,
+                password: password.value
+            })
+        });
+        const data = await res.json();
+        alert(data.message);
+    }
+
+    async function handleLogin() {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                username: username.value,
+                password: password.value
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            localStorage.setItem('user_id', data.user_id);
+            localStorage.setItem('username', data.username);
+            currentUserId = data.user_id;
+            showMain();
+        } else alert(data.message);
+    }
+
+    function handleLogout() {
+        localStorage.clear();
+        location.reload();
+    }
+
+    // ===== UPLOAD & ETL =====
+    async function uploadAndProcess() {
+        const fileInput = document.getElementById('file-input');
+        if (!fileInput.files[0]) return alert("Hãy chọn file!");
+
+        const file = fileInput.files[0];
+        const status = document.getElementById('status');
+        const btn = document.getElementById('upload-btn');
+
+        btn.disabled = true;
+        status.innerHTML = "⏳ Đang lấy link S3...";
+
+        try {
+            const urlRes = await fetch('/api/jobs/upload_url', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ file_name: file.name })
+            });
+            const { url, file_key } = await urlRes.json();
+
+            status.innerHTML = "⬆️ Đang upload lên S3...";
+            await fetch(url, { method: 'PUT', body: file });
+
+            status.innerHTML = "🤖 Đang chạy ETL & AI...";
+            const etlRes = await fetch('/api/jobs/start_etl', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    file_key: file_key,
+                    user_id: currentUserId
+                })
+            });
+            const etlData = await etlRes.json();
+
+            alert(etlData.message);
+            status.innerHTML = "✅ Hoàn thành!";
+            loadJobs();
+        } catch (e) {
+            console.error(e);
+            alert("❌ Có lỗi xảy ra!");
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ===== LOAD JOBS =====
+    async function loadJobs() {
+        const res = await fetch('/api/jobs');
+        const jobs = await res.json();
+        const tbody = document.getElementById('job-table-body');
+
+        tbody.innerHTML = jobs.map(j => `
+            <tr>
+                <td>${j.filename}</td>
+                <td>
+                    <span class="badge ${j.status === 'Completed' ? 'bg-success' : 'bg-warning'}">
+                        ${j.status}
+                    </span>
+                </td>
+                <td>${j.upload_time}</td>
+                <td>
+                    ${j.result_url
+                        ? `<a href="${j.result_url}" target="_blank">Tải file</a>`
+                        : '-'}
+                </td>
+            </tr>
+        `).join('');
+    }
+</script>
+
+</body>
+</html>

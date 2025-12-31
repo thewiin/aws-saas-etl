@@ -5,11 +5,13 @@ from models import db, User, Job
 app = Flask(__name__)
 
 # --- CẤU HÌNH KẾT NỐI DATABASE ---
-# 1. Để test nhanh (dùng SQLite - tạo file db.sqlite ngay tại đây):
+# 1. Để test nhanh (dùng SQLite – tạo file db.sqlite ngay tại đây):
 # app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///local_test.db'
 
 # 2. Để test với PostgreSQL (Nếu bạn cài Postgres trên máy hoặc kết nối tới AWS RDS):
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:Nhaiben%401651652004@localhost:5432/etl_saas_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    'postgresql://postgres:postgres123@etl-postgresbtl-db.cggxenjaxkli.us-east-1.rds.amazonaws.com:5432/postgres'
+)
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
@@ -28,7 +30,10 @@ def run_demo():
         print("2. Đang thêm User mẫu...")
         # Kiểm tra xem user tồn tại chưa để tránh lỗi trùng lặp khi chạy lại
         if not User.query.filter_by(username='demo_admin').first():
-            new_user = User(username='demo_admin', password='hashed_secret_password')
+            new_user = User(
+                username='demo_admin',
+                password='hashed_secret_password'
+            )
             db.session.add(new_user)
             db.session.commit()
             print("   -> Đã thêm User: demo_admin")
@@ -56,9 +61,13 @@ def run_demo():
         user_jobs = Job.query.filter_by(user_id=admin.id).all()
         print(f"   - Lịch sử Job của {admin.username}:")
         for job in user_jobs:
-            print(f"     + File: {job.filename} | Trạng thái: {job.status} | Thời gian: {job.upload_time}")
+            print(
+                f"     + File: {job.filename} | "
+                f"Trạng thái: {job.status} | "
+                f"Thời gian: {job.upload_time}"
+            )
 
-    print("\n--- KẾT THÚC DEMO: DATABASE HOẠT ĐỘNG TỐT! ---")
+        print("\n--- KẾT THÚC DEMO: DATABASE HOẠT ĐỘNG TỐT! ---")
 
 
 if __name__ == '__main__':
